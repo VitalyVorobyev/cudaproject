@@ -5,6 +5,7 @@ project(CourseraCudaProject LANGUAGES CXX CUDA)
 set(CMAKE_CUDA_STANDARD 14)
 
 find_package(CUDAToolkit REQUIRED)
+find_package(OpenCV REQUIRED)
 
 set(TARGET imgedges)
 
@@ -24,18 +25,22 @@ target_include_directories(${TARGET} PRIVATE
 )
 
 # Link libraries if needed
-#target_link_libraries(${TARGET} PRIVATE
-#    CUDA::cudart
-#    CUDA::cublas
-#    CUDA::cufft
-#    CUDA::cusolver
-#    CUDA::curand
-#    CUDA::nppicc
-#    CUDA::nppial
-#    CUDA::nppist
-#    CUDA::nppidei
-#    CUDA::nppig
-#    CUDA::nppitc
-#    CUDA::npps
-#)
-#
+target_link_libraries(${TARGET} PRIVATE
+    ${OpenCV_LIBS}
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cufft
+    CUDA::cusolver
+    CUDA::curand
+    CUDA::nppicc
+    CUDA::nppial
+    CUDA::nppist
+    CUDA::nppidei
+    CUDA::nppig
+    CUDA::nppitc
+    CUDA::npps
+    CUDA::nppisu
+    CUDA::nppif
+    CUDA::nppc
+    CUDA::culibos
+)
