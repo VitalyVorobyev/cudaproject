@@ -1,10 +1,14 @@
 // std
+#include <iostream>
 #include <string>
 
-#include "common/helper_cuda.h"
+#include "helper_cuda.h"
 
 int main(int argc, char** argv) {
     int deviceCount;
     checkCudaErrors(cudaGetDeviceCount(&deviceCount));
+
+    std::cout << deviceCount << " devices found" << std::endl;
+
     return 0;
 }
