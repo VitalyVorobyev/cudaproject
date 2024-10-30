@@ -89,25 +89,68 @@ bool loadImage(const std::string& filename, npp::ImageCPU_8u_C1& oHostSrc) {
     return true;
 }
 
+bool saveImage(const std::string& filename, const npp::ImageCPU_8u_C1& oHostSrc) {
+    #if 1
+    cv::Mat1b img(oHostSrc.height(), oHostSrc.width());
+    std::cout << "Image size: " << oHostSrc.width() << " x " << oHostSrc.height() << std::endl;
+    std::memcpy(img.data, oHostSrc.data(), oHostSrc.width() * oHostSrc.height() * sizeof(unsigned char));
+    #else
+    cv::Mat1b img((int)oHostSrc.height(), (int)oHostSrc.width(), (void*)oHostSrc.data());
+    #endif
+    return cv::imwrite(filename, img);
+}
+
 int main(int argc, const char** argv) {
     cudaDeviceInit();
     if (!printfNPPinfo()) return 0;
 
-    std::string ifname("../data/3.2.25.png");
-
-    // declare a host image object for an 8-bit grayscale image
+    const std::string ifname("../data/3.2.25.png");
     npp::ImageCPU_8u_C1 oHostSrc;
-    // load gray-scale image from disk
     if (!loadImage(ifname, oHostSrc)) return 0;
-    // declare a device image and copy construct from the host image,
-    // i.e. upload host to device
     npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
 
-    std::cout << "Image size: " << oDeviceSrc.width()
-        << " x " << oDeviceSrc.height() << std::endl;
+    #if 0
+    npp::ImageCPU_8u_C1 oHostSrcCopy(oDeviceSrc.size());
+    oDeviceSrc.copyTo(oHostSrcCopy.data(), oHostSrcCopy.pitch());
+    const std::string ofnameoriginal("originalcopy.png");
+    saveImage(ofnameoriginal, oHostSrcCopy);
+    #endif
 
-    // allocate device image
-    npp::ImageNPP_8u_C1 oDeviceDst(oDeviceSrc.width(), oDeviceSrc.height());
+    const int cols = oDeviceSrc.width();
+    const int rows = oDeviceSrc.height();
+    const int step = oDeviceSrc.pitch();  // cols * sizeof(Npp8u);
+    const NppiSize roi{cols, rows};
+    std::cout << "Image size: " << cols << " x " << rows << ", step: " << step << std::endl;
+
+    npp::ImageNPP_8u_C1 oDeviceBlured(cols, rows);
+    NppStatus blurstatus = nppiFilterGauss_8u_C1R(
+        oDeviceSrc.data(), step,
+        oDeviceBlured.data(), step, roi, NPP_MASK_SIZE_7_X_7);
+
+    if (blurstatus != NPP_SUCCESS) {
+        std::cerr << "Gaussian blue failed" << std::endl;
+        return 0;
+    }
+
+    npp::ImageCPU_8u_C1 oHostBlured(oDeviceBlured.size());
+    oDeviceBlured.copyTo(oHostBlured.data(), oHostBlured.pitch());
+    const std::string ofnameblured("blured.png");
+    saveImage(ofnameblured, oHostBlured);
+
+    #if 0
+    npp::ImageNPP_8u_C1 oDeviceDst(cols, rows);
+    nppi:NppStatus scolfil = nppiFilterColumn_8u_C1R();
+    npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
+    oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
+
+    const std::string ofname("egdes.png");
+    saveImage(ofname, oHostDst);
+    nppiFree(oDeviceDst.data());
+
+    #endif
+
+    nppiFree(oDeviceSrc.data());
+    nppiFree(oDeviceBlured.data());
 
     return 0;
 }
