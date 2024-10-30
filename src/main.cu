@@ -25,79 +25,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// std
-#include <iostream>
-#include <string>
+#include "kernels.h"
+#include "utils.h"
 
-// opencv
-#include <opencv2/imgcodecs.hpp>
+void find_extrema(const npp::ImageNPP_32f_C1& data, npp::ImageNPP_8u_C1& mask) {
+    int width = data.width();
+    int height = data.height();
 
-#include <npp.h>
-#include <nppi.h>
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
-#include "helper_cuda.h"
-#include "ImagesCPU.h"
-#include "ImagesNPP.h"
-
-void cudaDeviceInit() {
-    int deviceCount;
-    checkCudaErrors(cudaGetDeviceCount(&deviceCount));
-
-    if (deviceCount == 0) {
-        std::cerr << "CUDA error: no devices supporting CUDA." << std::endl;
-        exit(-1);
-    }
-
-    int dev = 0;  // findCudaDevice(argc, argv);
-
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, dev);
-    std::cerr << "cudaSetDevice GPU" << dev << " = " << deviceProp.name << std::endl;
-
-    checkCudaErrors(cudaSetDevice(dev));
+    findLocalExtremaEachPixel<<<gridSize, blockSize>>>(data.data(), mask.data(), width, height);
 }
 
-bool printfNPPinfo() {
-    const NppLibraryVersion *libVer = nppGetLibVersion();
-
-    std::cout << "NPP Library Version " <<
-        libVer->major << '.' << libVer->minor << '.' << libVer->build << '\n';
-
-    int driverVersion, runtimeVersion;
-    cudaDriverGetVersion(&driverVersion);
-    cudaRuntimeGetVersion(&runtimeVersion);
-
-    std::cout << "  CUDA Driver  Version: "
-        << driverVersion / 1000 << '.' << (driverVersion % 100) / 10 << ",\n"
-        << "  CUDA Runtime Version: "
-        << runtimeVersion / 1000 << '.' << (runtimeVersion % 100) / 10 << '\n';
-
-    // Min spec is SM 1.0 devices
-    bool bVal = checkCudaCapabilities(1, 0);
-    return bVal;
-}
-
-bool loadImage(const std::string& filename, npp::ImageCPU_8u_C1& oHostSrc) {
-    cv::Mat img = cv::imread(filename, cv::IMREAD_GRAYSCALE);
-    if (img.empty()) {
-        std::cerr << "Failed to load image: " << filename << std::endl;
-        return false;
-    }
-
-    oHostSrc = npp::ImageCPU_8u_C1(img.cols, img.rows);
-    std::memcpy(oHostSrc.data(), img.data, img.cols * img.rows * sizeof(unsigned char));
-    return true;
-}
-
-bool saveImage(const std::string& filename, const npp::ImageCPU_8u_C1& oHostSrc) {
-    #if 1
-    cv::Mat1b img(oHostSrc.height(), oHostSrc.width());
-    std::cout << "Image size: " << oHostSrc.width() << " x " << oHostSrc.height() << std::endl;
-    std::memcpy(img.data, oHostSrc.data(), oHostSrc.width() * oHostSrc.height() * sizeof(unsigned char));
-    #else
-    cv::Mat1b img((int)oHostSrc.height(), (int)oHostSrc.width(), (void*)oHostSrc.data());
-    #endif
-    return cv::imwrite(filename, img);
+bool save_image(const npp::ImageNPP_8u_C1& img_d, const std::string& fname) {
+    npp::ImageCPU_8u_C1 img_h(img_d.size());
+    img_d.copyTo(img_h.data(), img_h.pitch());
+    return saveImage(fname, img_h);
 }
 
 int main(int argc, const char** argv) {
@@ -105,52 +49,75 @@ int main(int argc, const char** argv) {
     if (!printfNPPinfo()) return 0;
 
     const std::string ifname("../data/3.2.25.png");
-    npp::ImageCPU_8u_C1 oHostSrc;
-    if (!loadImage(ifname, oHostSrc)) return 0;
-    npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
+    npp::ImageCPU_8u_C1 host_src;
+    if (!loadImage(ifname, host_src)) return 0;
+    npp::ImageNPP_8u_C1 device_src(host_src);
+
+    const int cols = device_src.width();
+    const int rows = device_src.height();
+    const NppiSize roi{cols, rows};
 
     #if 0
-    npp::ImageCPU_8u_C1 oHostSrcCopy(oDeviceSrc.size());
-    oDeviceSrc.copyTo(oHostSrcCopy.data(), oHostSrcCopy.pitch());
-    const std::string ofnameoriginal("originalcopy.png");
-    saveImage(ofnameoriginal, oHostSrcCopy);
+    save_image(device_src, "originalcopy.png");
     #endif
 
-    const int cols = oDeviceSrc.width();
-    const int rows = oDeviceSrc.height();
-    const int step = oDeviceSrc.pitch();  // cols * sizeof(Npp8u);
-    const NppiSize roi{cols, rows};
-    std::cout << "Image size: " << cols << " x " << rows << ", step: " << step << std::endl;
+    npp::ImageCPU_32f_C1 device_src_32f(device_src.size());
+    NppStatus status = nppiConvert_8u32f_C1R(
+        device_src.data(), device_src.pitch(),
+        device_src_32f.data(), device_src_32f.pitch(), roi);
 
-    npp::ImageNPP_8u_C1 oDeviceBlured(cols, rows);
-    NppStatus blurstatus = nppiFilterGauss_8u_C1R(
-        oDeviceSrc.data(), step,
-        oDeviceBlured.data(), step, roi, NPP_MASK_SIZE_7_X_7);
-
-    if (blurstatus != NPP_SUCCESS) {
-        std::cerr << "Gaussian blue failed" << std::endl;
+    if (status != NPP_SUCCESS) {
+        std::cerr << "Error converting image to 32-bit float: " << status << std::endl;
         return 0;
     }
 
-    npp::ImageCPU_8u_C1 oHostBlured(oDeviceBlured.size());
-    oDeviceBlured.copyTo(oHostBlured.data(), oHostBlured.pitch());
-    const std::string ofnameblured("blured.png");
-    saveImage(ofnameblured, oHostBlured);
+    std::cout << "Image size: " << cols << " x " << rows << std::endl;
+
+    npp::ImageNPP_32f_C1 device_blured(device_src_32f.size());
+    status = nppiFilterGauss_32f_C1R(
+        device_src_32f.data(), device_src_32f.pitch(),
+        device_blured.data(), device_blured.pitch(), roi, NPP_MASK_SIZE_5_X_5);
+
+    if (status != NPP_SUCCESS) {
+        std::cerr << "Gaussian blur failed: " << status << std::endl;
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
+        }
+        return 0;
+    }
 
     #if 0
-    npp::ImageNPP_8u_C1 oDeviceDst(cols, rows);
-    nppi:NppStatus scolfil = nppiFilterColumn_8u_C1R();
-    npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
-    oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
-
-    const std::string ofname("egdes.png");
-    saveImage(ofname, oHostDst);
-    nppiFree(oDeviceDst.data());
-
+    save_image(oDeviceBlured, "blured.png");
     #endif
 
-    nppiFree(oDeviceSrc.data());
-    nppiFree(oDeviceBlured.data());
+    npp::ImageNPP_32f_C1 device_gradient(device_blured.size());
+    Npp32f gradkernel[] = {-1.0f, 0.0f, 1.0f};
+    int kernelSize = sizeof(gradkernel) / sizeof(gradkernel[0]);
+    int anchor = kernelSize / 2;
+
+    status = nppiFilterColumn_32f_C1R(
+        device_blured.data(), device_blured.pitch(),
+        device_gradient.data(), device_gradient.pitch(),
+        roi, gradkernel, kernelSize, anchor);
+    
+    if (status != NPP_SUCCESS) {
+        std::cerr << "Gradient filter failed: " << status << std::endl;
+        return 0;
+    }
+
+    npp::ImageNPP_8u_C1 device_edges(device_gradient.size());
+    find_extrema(device_gradient, device_edges);
+
+    if (!save_image(device_edges, "egdes.png")) {
+        std::cerr << "Failed to save output image" << std::endl;
+    }
+
+    nppiFree(device_edges.data());
+    nppiFree(device_gradient.data());
+    nppiFree(device_src.data());
+    nppiFree(device_src_32f.data());
+    nppiFree(device_blured.data());
 
     return 0;
 }
