@@ -80,7 +80,7 @@ bool printfNPPinfo() {
 bool loadImage(const std::string& filename, npp::ImageCPU_8u_C1& oHostSrc) {
     cv::Mat img = cv::imread(filename, cv::IMREAD_GRAYSCALE);
     if (img.empty()) {
-        throw std::runtime_error("Failed to load image: " + filename);
+        std::cerr << "Failed to load image: " << filename << std::endl;
         return false;
     }
 
@@ -102,6 +102,12 @@ int main(int argc, const char** argv) {
     // declare a device image and copy construct from the host image,
     // i.e. upload host to device
     npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
+
+    std::cout << "Image size: " << oDeviceSrc.width()
+        << " x " << oDeviceSrc.height() << std::endl;
+
+    // allocate device image
+    npp::ImageNPP_8u_C1 oDeviceDst(oDeviceSrc.width(), oDeviceSrc.height());
 
     return 0;
 }
