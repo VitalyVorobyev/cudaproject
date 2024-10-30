@@ -16,16 +16,14 @@ __global__ void findLocalExtrema(const Npp32f* src, Npp8u* mask, int width, int 
     }
 }
 
-__global__ void findLocalExtremaEachPixel(const Npp32f* src, Npp8u* mask, int width, int height) {
+__global__ void findLocalExtremaEachPixel(const Npp32f* src, Npp8u* mask, int width, int height, int srcstep, int maskstep) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y < 1 || y >= height - 1) return;
-    int idx = y * width + x;
-    // auto cur = src[idx];
-    // auto prev = src[idx - width];
-    // auto next = src[idx + width];
-    mask[idx] = 255 * (
-        (src[idx] > src[idx - width] && src[idx] > src[idx + width]) || 
-        (src[idx] < src[idx - width] && src[idx] < src[idx + width]));
+    int idx = y * srcstep + x;
+    int maskidx = y * maskstep + x;
+    mask[maskidx] = 255 * (
+        (src[idx] > src[idx - srcstep] && src[idx] > src[idx + srcstep]) || 
+        (src[idx] < src[idx - srcstep] && src[idx] < src[idx + srcstep]));
 }
